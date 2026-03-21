@@ -211,7 +211,13 @@ export default function Home() {
         body: JSON.stringify({ username, pfpBase64, mediaType, vibe, tweetTopic, xProfile }),
       });
       const analysisData = await analysisRes.json();
-      if (analysisData.error) throw new Error(analysisData.error);
+      if (analysisData.error) {
+        console.error("Analysis failed:", analysisData.error);
+        throw new Error(analysisData.error);
+      }
+      if (!analysisData.result) {
+        throw new Error("No result returned from analysis");
+      }
       const parsed: AnalysisResult = analysisData.result;
 
       setAnalyzeStep("Generating your aged portrait...");
