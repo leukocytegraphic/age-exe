@@ -7,7 +7,6 @@ export async function POST(req: NextRequest) {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "No Gemini API key configured" }, { status: 500 });
 
-    // Build X context
     let xCtx = "No X profile data available.";
     if (xProfile?.display_name) {
       const tweets = xProfile.recent_tweets?.slice(0, 3).join(" | ") || "none";
@@ -23,60 +22,34 @@ export async function POST(req: NextRequest) {
       ].filter(Boolean).join("\n");
     }
 
-    const prompt = `You are the X Oracle — a sharp, witty cultural analyst. Analyze this profile picture for @${username}.
+    const prompt = `You are the X Oracle. Analyze this profile picture for @${username}.
 
-SELF-REPORTED INFO:
-- Their X vibe: "${vibe || "not given"}"
-- They tweet about: "${tweetTopic || "not given"}"
+SELF-REPORTED: Vibe: "${vibe || "not given"}" | Tweets about: "${tweetTopic || "not given"}"
 
-LIVE X ACCOUNT DATA:
-${xCtx}
+LIVE X DATA: ${xCtx}
 
-YOUR JOB:
-1. Look hard at the image. Note EVERYTHING visible: lighting, background, expression, colors, filters, pose, outfit, art style, image quality, real face vs cartoon vs meme vs anime vs abstract, any text visible.
-2. Cross-reference with the live X data for a sharper personality read.
-3. Predict their real age based on all signals combined.
+Look at the image carefully. Note everything visible: lighting, background, expression, colors, filters, pose, outfit, art style, real face vs cartoon vs meme vs anime.
 
-ROAST RULES — MOST IMPORTANT FIELD:
-- Must reference something SPECIFIC and VISIBLE in this exact image
-- If real face: comment on expression, background, lighting, outfit, filter
-- If anime/cartoon: roast the choice of using that PFP
-- If meme PFP: roast what that says about them
-- BANNED: generic roasts like "posts at 2am", "chronically online" — too generic
-- GOOD examples: "Rainbow glasses on an ape — bold choice for a professional bio.", "Pixel art PFP in 2024 screaming nostalgia loudly.", "Anime villain arc but the bio says God first.", "That filter is carrying this whole aesthetic."
-- Funny, specific, a little mean but not cruel. 8-14 words MAX.
+ROAST: Must reference something SPECIFIC you can SEE in this image. No generic roasts.
+Good: "Rainbow glasses on an ape pfp — bold life choice.", "Pixel art pfp in 2024, screaming nostalgia.", "Anime villain arc but bio says God first."
+Bad: "Posts at 2am", "chronically online" — too generic, banned.
 
-AGED PORTRAIT: Describe this exact person aged to predicted_age, full body head to toe. Include specific physical features visible, how they age, what they wear at that age, where they stand.
+IMPORTANT: Your response must be valid JSON. Do NOT use newlines or line breaks inside any string values. Keep all strings on one line.
 
-Return ONLY raw JSON, zero markdown:
-{
-  "predicted_age": <integer 16-68, make a REAL prediction based on what you see, NEVER default to 27>,
-  "confidence": "Low|Medium|High",
-  "age_era": "<5 words max, creative era label specific to this person>",
-  "roast": "<MUST reference something VISIBLE in this image, 8-14 words, funny and specific>",
-  "pfp_energy": "<3-4 words capturing their unique essence>",
-  "x_diagnosis": "<8 words max, specific behavioral diagnosis based on their data>",
-  "secret_trait": "<7 words max, uncomfortably accurate observation>",
-  "aged_portrait_prompt": "<detailed full body portrait prompt of this exact person at predicted_age>"
-}`;
+Return ONLY this JSON object, nothing else:
+{"predicted_age": <integer 16-68>,"confidence": "Low|Medium|High","age_era": "<5 words max>","roast": "<specific to this image, 8-14 words>","pfp_energy": "<3-4 words>","x_diagnosis": "<8 words max>","secret_trait": "<7 words max>","aged_portrait_prompt": "<one line description of this person aged to predicted_age, full body>"}`;
 
-    // Gemini API call with vision
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{
-            parts: [
-              { inline_data: { mime_type: mediaType, data: pfpBase64 } },
-              { text: prompt }
-            ]
-          }],
-          generationConfig: {
-            temperature: 0.9,
-            maxOutputTokens: 1024,
-          }
+          contents: [{ parts: [
+            { inline_data: { mime_type: mediaType, data: pfpBase64 } },
+            { text: prompt }
+          ]}],
+          generationConfig: { temperature: 0.9, maxOutputTokens: 1024 }
         }),
       }
     );
@@ -94,15 +67,24 @@ Return ONLY raw JSON, zero markdown:
       return NextResponse.json({ error: "Empty response from Gemini" }, { status: 500 });
     }
 
-    // Robustly extract JSON from Gemini response
-    let clean = text.replace(/```json|```/g, "").trim();
-    const jsonStart = clean.indexOf("{");
-    const jsonEnd = clean.lastIndexOf("}");
-    if (jsonStart !== -1 && jsonEnd !== -1) {
-      clean = clean.slice(jsonStart, jsonEnd + 1);
+    // Extract JSON object from response
+    const jsonStart = text.indexOf("{");
+    const jsonEnd = text.lastIndexOf("}");
+    if (jsonStart === -1 || jsonEnd === -1) {
+      console.error("No JSON braces found:", text.slice(0, 300));
+      return NextResponse.json({ error: "No JSON in response" }, { status: 500 });
     }
-    const parsed = JSON.parse(clean);
 
+    let jsonStr = text.slice(jsonStart, jsonEnd + 1);
+
+    // Fix unescaped newlines inside JSON strings — the main cause of parse failures
+    // Replace actual newline characters inside string values with a space
+    jsonStr = jsonStr.replace(/"([^"]*)"/g, (_match: string, inner: string) => {
+      const fixed = inner.replace(/\n/g, " ").replace(/\r/g, "").replace(/\t/g, " ");
+      return `"${fixed}"`;
+    });
+
+    const parsed = JSON.parse(jsonStr);
     const age = parseInt(parsed.predicted_age);
     parsed.predicted_age = (!isNaN(age) && age >= 16 && age <= 68) ? age : 26;
 
