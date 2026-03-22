@@ -272,81 +272,86 @@ export default function Home() {
         <div className="fadeup" style={{width:"100%",maxWidth:380,display:"flex",flexDirection:"column",gap:10}}>
           {fromCache&&<div style={{textAlign:"center",fontSize:9,letterSpacing:3,color:"#2a6644",padding:"5px 12px",background:"rgba(0,255,136,0.05)",border:"1px solid rgba(0,255,136,0.1)",borderRadius:3}}>◈ SAME INPUTS · ORACLE LOCKED · CONSISTENT RESULT</div>}
 
-          <div ref={cardRef} style={{background:"#08090d",padding:12,borderRadius:10}}>
-            <div style={{background:"#0d0e14",border:`1px solid ${ac}20`,borderRadius:8,overflow:"hidden",boxShadow:`0 0 40px ${ac}10`,width:480,height:480}}>
+          <div ref={cardRef} style={{background:"#08090d",padding:16,borderRadius:12}}>
+            <div style={{width:640,background:"#0d0e14",border:"1px solid rgba(0,207,255,0.2)",borderRadius:10,overflow:"hidden",fontFamily:"'Courier New',monospace"}}>
 
-              {/* Header strip — full width */}
-              <div style={{background:`linear-gradient(90deg,${ac}14,transparent 60%)`,borderBottom:`1px solid ${ac}12`,padding:"6px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",height:28}}>
-                <span style={{fontSize:7,letterSpacing:4,color:"#1e1e28"}}>X ORACLE // DIGITAL ID</span>
-                <span style={{fontSize:7,letterSpacing:2,color:"#1e1e28"}}>CONF: {result.confidence}</span>
+              {/* Header */}
+              <div style={{background:"linear-gradient(90deg,rgba(0,207,255,0.08),transparent)",borderBottom:"1px solid rgba(0,207,255,0.1)",padding:"8px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:9,letterSpacing:4,color:"#333a4a"}}>X ORACLE // DIGITAL ID</span>
+                <span style={{fontSize:9,letterSpacing:2,color:"#333a4a"}}>CONF: {result.confidence}</span>
               </div>
 
-              {/* Body — square split: image left | details right */}
-              <div style={{display:"flex",height:452}}>
+              {/* Body */}
+              <div style={{display:"flex",height:420}}>
 
-                {/* LEFT — portrait image, fills half */}
-                <div style={{position:"relative",width:226,flexShrink:0,overflow:"hidden",borderRight:`1px solid ${ac}15`}}>
-                  {imgStatus==="loading"&&(
-                    <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8,zIndex:2,background:"#0a0b10"}}>
-                      <div style={{fontSize:20,animation:"spin 2s linear infinite",color:"#00cfff",opacity:.4}}>◎</div>
-                      <div style={{fontSize:8,color:"#2a2a35",letterSpacing:1,animation:"shimmer 1.5s infinite",textAlign:"center"}}>generating<br/>portrait...</div>
+                {/* LEFT — portrait image */}
+                <div style={{width:280,flexShrink:0,position:"relative",overflow:"hidden",borderRight:"1px solid rgba(0,207,255,0.1)"}}>
+                  {imgStatus==="loading" && (
+                    <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:10,zIndex:2,background:"#0d0e14"}}>
+                      <div style={{fontSize:28,animation:"spin 2s linear infinite",color:"#00cfff",opacity:.3}}>◎</div>
+                      <div style={{fontSize:9,color:"#2a3040",letterSpacing:2,animation:"shimmer 1.5s infinite",textAlign:"center"}}>generating<br/>aged portrait...</div>
                     </div>
                   )}
-                  <img src={agedImg||pfp||""} alt="portrait" style={{width:"100%",height:"100%",objectFit:"cover",display:"block",filter:agedImg?"none":"saturate(.5) brightness(.6)"}}/>
-                  {/* Age badge over image */}
-                  <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(8,9,13,0.96))",padding:"28px 10px 8px"}}>
-                    <div style={{display:"flex",alignItems:"baseline",gap:4}}>
-                      <span style={{fontSize:"2.4rem",fontWeight:900,color:ac,lineHeight:1,letterSpacing:-2}}>{result.predicted_age}</span>
-                      <span style={{fontSize:8,color:"#2e2e3a",letterSpacing:2}}>YRS</span>
+                  <img
+                    src={agedImg || pfp || ""}
+                    alt="portrait"
+                    style={{width:"100%",height:"100%",objectFit:"cover",display:"block",filter:agedImg?"none":"saturate(.4) brightness(.6)"}}
+                  />
+                  {/* Age stamp at bottom of image */}
+                  <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(8,9,13,0.98))",padding:"40px 16px 14px"}}>
+                    <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                      <span style={{fontSize:"3.4rem",fontWeight:900,color:ac,lineHeight:1,letterSpacing:-3}}>{result.predicted_age}</span>
+                      <span style={{fontSize:10,color:"#2e3a4a",letterSpacing:2}}>YRS</span>
                     </div>
-                    <div style={{fontSize:7,color:"#3a3a4a",letterSpacing:2,textTransform:"uppercase",marginTop:1}}>{result.age_era}</div>
+                    <div style={{fontSize:8,color:"#3a4a5a",letterSpacing:2,textTransform:"uppercase",marginTop:3}}>{result.age_era}</div>
                   </div>
                 </div>
 
                 {/* RIGHT — all details */}
-                <div style={{flex:1,display:"flex",flexDirection:"column",padding:"16px 14px",gap:0,overflow:"hidden"}}>
+                <div style={{flex:1,display:"flex",flexDirection:"column",padding:"20px 18px"}}>
 
                   {/* Username + energy */}
-                  <div style={{marginBottom:14}}>
-                    <div style={{fontSize:12,color:"#00cfff",letterSpacing:1,fontWeight:700}}>@{username}</div>
-                    <div style={{fontSize:9,color:"#2a2a35",letterSpacing:1,marginTop:3}}>{result.pfp_energy}</div>
+                  <div style={{marginBottom:16,paddingBottom:14,borderBottom:"1px solid rgba(0,207,255,0.08)"}}>
+                    <div style={{fontSize:14,color:"#00cfff",letterSpacing:1,fontWeight:700}}>@{username}</div>
+                    <div style={{fontSize:10,color:"#2a3040",letterSpacing:1,marginTop:4}}>{result.pfp_energy}</div>
                   </div>
 
                   {/* Big age */}
-                  <div style={{marginBottom:14}}>
-                    <div style={{fontSize:"3.2rem",fontWeight:900,color:ac,lineHeight:1,letterSpacing:-3}}>{result.predicted_age}</div>
-                    <div style={{fontSize:8,color:"#3a3a4a",letterSpacing:2,textTransform:"uppercase",marginTop:2}}>{result.age_era}</div>
+                  <div style={{marginBottom:18}}>
+                    <div style={{fontSize:"4rem",fontWeight:900,color:ac,lineHeight:1,letterSpacing:-3}}>{result.predicted_age}</div>
+                    <div style={{fontSize:9,color:"#3a4a5a",letterSpacing:2,textTransform:"uppercase",marginTop:4}}>{result.age_era}</div>
                   </div>
 
-                  <div style={{borderTop:`1px solid ${ac}12`,paddingTop:12,display:"flex",flexDirection:"column",gap:10,flex:1}}>
+                  {/* Stats */}
+                  <div style={{display:"flex",flexDirection:"column",gap:14,flex:1}}>
                     <div>
-                      <div style={{fontSize:7,letterSpacing:3,color:"#1e1e28",marginBottom:3}}>X DIAGNOSIS</div>
-                      <div style={{fontSize:10,color:"#555",lineHeight:1.5}}>{result.x_diagnosis}</div>
+                      <div style={{fontSize:8,letterSpacing:3,color:"#1e2535",marginBottom:4}}>X DIAGNOSIS</div>
+                      <div style={{fontSize:11,color:"#556070",lineHeight:1.5}}>{result.x_diagnosis}</div>
                     </div>
                     <div>
-                      <div style={{fontSize:7,letterSpacing:3,color:"#1e1e28",marginBottom:3}}>SECRET TRAIT</div>
-                      <div style={{fontSize:10,color:"#444",fontStyle:"italic",lineHeight:1.5}}>{result.secret_trait}</div>
+                      <div style={{fontSize:8,letterSpacing:3,color:"#1e2535",marginBottom:4}}>SECRET TRAIT</div>
+                      <div style={{fontSize:11,color:"#445060",fontStyle:"italic",lineHeight:1.5}}>{result.secret_trait}</div>
                     </div>
                     {xProfile && (xProfile as {join_year?:number}).join_year && (
                       <div>
-                        <div style={{fontSize:7,letterSpacing:3,color:"#1e1e28",marginBottom:3}}>ON X SINCE</div>
-                        <div style={{fontSize:10,color:"#3a3a4a"}}>{(xProfile as {join_year?:number}).join_year}</div>
+                        <div style={{fontSize:8,letterSpacing:3,color:"#1e2535",marginBottom:4}}>ON X SINCE</div>
+                        <div style={{fontSize:11,color:"#3a4a5a"}}>{(xProfile as {join_year?:number}).join_year}</div>
                       </div>
                     )}
                   </div>
 
-                  {/* Roast at bottom of right panel */}
-                  <div style={{borderTop:"1px solid #0e0f18",paddingTop:10,marginTop:"auto"}}>
-                    <div style={{fontSize:7,letterSpacing:3,color:"#1e1e28",marginBottom:4}}>◈ ORACLE SAYS</div>
-                    <div style={{fontSize:10,color:"#ccc",fontStyle:"italic",lineHeight:1.5}}>"{result.roast}"</div>
+                  {/* Roast pinned to bottom */}
+                  <div style={{borderTop:"1px solid #111820",paddingTop:14,marginTop:"auto"}}>
+                    <div style={{fontSize:8,letterSpacing:3,color:"#1e2535",marginBottom:6}}>◈ ORACLE SAYS</div>
+                    <div style={{fontSize:11,color:"#99aabb",fontStyle:"italic",lineHeight:1.6}}>"{result.roast}"</div>
                   </div>
                 </div>
               </div>
 
               {/* Footer */}
-              <div style={{padding:"4px 12px",background:"#060709",display:"flex",justifyContent:"space-between",borderTop:"1px solid #0a0b10"}}>
-                <span style={{fontSize:6,color:"#111118",letterSpacing:3}}>AGE.EXE · X ORACLE</span>
-                <span style={{fontSize:6,color:"#111118",letterSpacing:2}}>ENTERTAINMENT ONLY</span>
+              <div style={{padding:"6px 18px",background:"#060709",display:"flex",justifyContent:"space-between",borderTop:"1px solid #0a0b10"}}>
+                <span style={{fontSize:8,color:"#1a1a22",letterSpacing:3}}>AGE.EXE · X ORACLE</span>
+                <span style={{fontSize:8,color:"#1a1a22",letterSpacing:2}}>ENTERTAINMENT ONLY</span>
               </div>
             </div>
           </div>
