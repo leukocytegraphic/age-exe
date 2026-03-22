@@ -1,24 +1,21 @@
 "use client";
 import { useState, useRef, useCallback } from "react";
+import html2canvas from "html2canvas";
 
-const STAGES = { UPLOAD: "upload", QUESTIONS: "questions", ANALYZING: "analyzing", RESULT: "result" };
-const VIBES = ["Main Character", "NPC Energy", "Chronically Online", "Lurker", "Clout Chaser", "Thought Leader", "Doomscroller"];
-const TWEET_TOPICS = ["Hot Takes", "Memes Only", "News & Politics", "Tech & AI", "Sports", "Fan Accounts", "Self-promo"];
+const VIBES = ["Main Character","NPC Energy","Chronically Online","Lurker","Clout Chaser","Thought Leader","Doomscroller"];
+const TWEET_TOPICS = ["Hot Takes","Memes Only","News & Politics","Tech & AI","Sports","Fan Accounts","Self-promo"];
 
-async function buildCacheKey(username: string, pfpPreview: string, vibe: string, topic: string) {
-  const img = pfpPreview || "";
+// Stable cache key from username + pfp sample + vibe + topic
+async function buildCacheKey(username: string, pfp: string, vibe: string, topic: string) {
+  const img = pfp || "";
   const len = img.length;
-  const fingerprint = img.slice(0, 120)
-    + img.slice(Math.floor(len * 0.45), Math.floor(len * 0.45) + 120)
-    + img.slice(Math.max(0, len - 120));
-  const raw = `${username.toLowerCase().trim()}::${fingerprint}::${vibe}::${topic}`;
+  const sample = img.slice(0,120) + img.slice(Math.floor(len*0.45), Math.floor(len*0.45)+120) + img.slice(Math.max(0,len-120));
+  const raw = `${username.toLowerCase().trim()}::${sample}::${vibe}::${topic}`;
   const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
-  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,"0")).join("").slice(0,32);
 }
 
-const RESULT_CACHE: Record<string, { result: AnalysisResult; agedImage: string | null }> = {};
-
-interface AnalysisResult {
+interface OracleResult {
   predicted_age: number;
   confidence: string;
   age_era: string;
@@ -26,33 +23,35 @@ interface AnalysisResult {
   pfp_energy: string;
   x_diagnosis: string;
   secret_trait: string;
-  aged_portrait_prompt?: string;
+  aged_portrait_prompt: string;
 }
 
+const CACHE: Record<string, { result: OracleResult; agedImg: string | null }> = {};
+
 function getColor(age: number) {
-  if (age < 22) return "#00ff88";
+  if (age < 20) return "#00ff88";
   if (age < 30) return "#00cfff";
   if (age < 40) return "#ffcc00";
-  if (age < 52) return "#ff8c42";
+  if (age < 55) return "#ff8c42";
   return "#ff4466";
 }
 
 export default function Home() {
-  const [stage, setStage] = useState(STAGES.UPLOAD);
+  const [stage, setStage] = useState<"upload"|"questions"|"loading"|"result">("upload");
   const [username, setUsername] = useState("");
-  const [pfpFile, setPfpFile] = useState<File | null>(null);
-  const [pfpPreview, setPfpPreview] = useState<string | null>(null);
+  const [pfp, setPfp] = useState<string|null>(null);
+  const [pfpFile, setPfpFile] = useState<File|null>(null);
   const [vibe, setVibe] = useState("");
-  const [tweetTopic, setTweetTopic] = useState("");
-  const [result, setResult] = useState<AnalysisResult | null>(null);
-  const [dragOver, setDragOver] = useState(false);
-  const [xProfile, setXProfile] = useState<any>(null);
-  const [xStatus, setXStatus] = useState<"idle" | "loading" | "done" | "failed">("idle");
-  const [analyzeStep, setAnalyzeStep] = useState("");
-  const [agedImage, setAgedImage] = useState<string | null>(null);
-  const [imageStatus, setImageStatus] = useState<"idle" | "loading" | "done" | "failed">("idle");
+  const [topic, setTopic] = useState("");
+  const [result, setResult] = useState<OracleResult|null>(null);
+  const [agedImg, setAgedImg] = useState<string|null>(null);
+  const [loadingStep, setLoadingStep] = useState("");
+  const [imgStatus, setImgStatus] = useState<"loading"|"done"|"failed"|"idle">("idle");
+  const [xProfile, setXProfile] = useState<Record<string,unknown>|null>(null);
+  const [xStatus, setXStatus] = useState<"idle"|"loading"|"done"|"failed">("idle");
   const [fromCache, setFromCache] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -60,182 +59,288 @@ export default function Home() {
     if (!file || !file.type.startsWith("image/")) return;
     setPfpFile(file);
     const reader = new FileReader();
-    reader.onload = (e) => setPfpPreview(e.target?.result as string);
+    reader.onload = (e) => setPfp(e.target?.result as string);
     reader.readAsDataURL(file);
   }, []);
 
-  const onDrop = (e: React.DragEvent) => {
-    e.preventDefault(); setDragOver(false);
-    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
-  };
-
-  const goToQuestions = async () => {
-    if (!username.trim() || !pfpFile) return;
-    setStage(STAGES.QUESTIONS);
+  const fetchXData = async (handle: string) => {
     setXStatus("loading");
     try {
       const res = await fetch("/api/x-agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username }),
+        body: JSON.stringify({ username: handle }),
       });
       const data = await res.json();
-      if (data.profile) {
-        setXProfile(data.profile);
-        setXStatus("done");
-      } else {
-        setXStatus("failed");
-      }
-    } catch {
-      setXStatus("failed");
-    }
+      if (data.profile?.display_name) { setXProfile(data.profile); setXStatus("done"); }
+      else setXStatus("failed");
+    } catch { setXStatus("failed"); }
   };
 
-  const createCanvasPortrait = (imgSrc: string, age: number): Promise<string> => {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.crossOrigin = "anonymous";
-      img.onload = () => {
-        const W = 320, H = 480;
-        const canvas = document.createElement("canvas");
-        canvas.width = W; canvas.height = H;
-        const ctx = canvas.getContext("2d")!;
-        const bg = ctx.createLinearGradient(0, 0, 0, H);
-        bg.addColorStop(0, "#0a0b10"); bg.addColorStop(1, "#050608");
-        ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
-        ctx.save();
-        ctx.beginPath(); ctx.roundRect(40, 60, 240, 290, 4); ctx.clip();
-        ctx.drawImage(img, 40, 60, 240, 290);
-        ctx.restore();
-        resolve(canvas.toDataURL("image/png"));
-      };
-      img.src = imgSrc;
-    });
+  const goToQuestions = () => {
+    if (!username.trim() || !pfp) return;
+    setStage("questions");
+    fetchXData(username);
   };
 
-  const analyzeAge = async () => {
-    if (!pfpPreview || !pfpFile) return;
-    setStage(STAGES.ANALYZING);
-    setAnalyzeStep("Dialing the Oracle...");
-    
+  const generateAgedImage = async (prompt: string, age: number): Promise<string|null> => {
+    setImgStatus("loading");
     try {
-      const cacheKey = await buildCacheKey(username, pfpPreview, vibe, tweetTopic);
-      if (RESULT_CACHE[cacheKey]) {
-        setResult(RESULT_CACHE[cacheKey].result);
-        setAgedImage(RESULT_CACHE[cacheKey].agedImage);
-        setFromCache(true);
-        setStage(STAGES.RESULT);
-        return;
-      }
+      const res = await fetch("/api/generate-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, age }),
+      });
+      const data = await res.json();
+      if (data.imageBase64) { setImgStatus("done"); return data.imageBase64; }
+      setImgStatus("failed");
+      return null;
+    } catch { setImgStatus("failed"); return null; }
+  };
+
+  const runOracle = async () => {
+    if (!pfp || !pfpFile) return;
+    setStage("loading");
+    setFromCache(false);
+
+    const cacheKey = await buildCacheKey(username, pfp, vibe, topic);
+    if (CACHE[cacheKey]) {
+      setLoadingStep("Oracle remembers you...");
+      await new Promise(r => setTimeout(r, 800));
+      const { result: cached, agedImg: cachedImg } = CACHE[cacheKey];
+      setResult(cached); setAgedImg(cachedImg);
+      setFromCache(true); setStage("result"); return;
+    }
+
+    try {
+      setLoadingStep("Reading your PFP energy...");
+      await new Promise(r => setTimeout(r, 500));
+      setLoadingStep("Cross-referencing X timeline...");
+      await new Promise(r => setTimeout(r, 500));
+      setLoadingStep("Calculating digital age...");
 
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ 
-          username, 
-          pfpBase64: pfpPreview.split(",")[1], 
-          vibe, 
-          tweetTopic 
+        body: JSON.stringify({
+          username,
+          pfpBase64: pfp.split(",")[1],
+          mediaType: pfpFile.type,
+          vibe, tweetTopic: topic, xProfile,
         }),
       });
-      
       const data = await res.json();
-      if (!data.result) throw new Error("Analysis failed");
-      
-      setResult(data.result);
-      setAnalyzeStep("Generating Aged Portrait...");
+      if (data.error) throw new Error(data.error);
+      const parsed: OracleResult = data.result;
 
-      const imgRes = await fetch("/api/generate-image", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: data.result.aged_portrait_prompt }),
-      });
-      
-      const imgData = await imgRes.json();
-      const finalImg = imgData.imageBase64 || await createCanvasPortrait(pfpPreview, data.result.predicted_age);
-      
-      setAgedImage(finalImg);
-      RESULT_CACHE[cacheKey] = { result: data.result, agedImage: finalImg };
-      setStage(STAGES.RESULT);
-    } catch (err) {
-      console.error(err);
-      setStage(STAGES.UPLOAD);
-      alert("System Crash. Try again.");
+      setResult(parsed);
+      setStage("result");
+
+      setLoadingStep("Generating aged portrait...");
+      const img = await generateAgedImage(parsed.aged_portrait_prompt, parsed.predicted_age);
+      setAgedImg(img);
+      CACHE[cacheKey] = { result: parsed, agedImg: img };
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      alert(`Oracle Error: ${msg}`);
+      setStage("questions");
     }
   };
 
   const downloadCard = async () => {
     if (!cardRef.current) return;
     setDownloading(true);
-    const html2canvas = (await import("html2canvas")).default;
-    const canvas = await html2canvas(cardRef.current, { backgroundColor: "#08090d" });
-    const link = document.createElement("a");
-    link.download = `oracle-${username}.png`;
-    link.href = canvas.toDataURL();
-    link.click();
+    try {
+      const canvas = await html2canvas(cardRef.current, { backgroundColor: "#08090d", scale: 2, useCORS: true, allowTaint: true });
+      const a = document.createElement("a");
+      a.download = `age-oracle-@${username}.png`;
+      a.href = canvas.toDataURL("image/png");
+      a.click();
+    } catch { alert("Try screenshotting instead!"); }
     setDownloading(false);
+  };
+
+  const reset = () => {
+    setStage("upload"); setUsername(""); setPfp(null); setPfpFile(null);
+    setVibe(""); setTopic(""); setResult(null); setAgedImg(null);
+    setXProfile(null); setXStatus("idle"); setImgStatus("idle"); setFromCache(false);
   };
 
   const ac = result ? getColor(result.predicted_age) : "#00cfff";
 
   return (
-    <main style={{ minHeight: "100vh", background: "#08090d", fontFamily: "'Courier New',monospace", color: "#e8e8e8", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+    <main style={{ minHeight:"100vh", background:"#08090d", fontFamily:"'Courier New',monospace", color:"#e8e8e8", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", padding:"20px", position:"relative", overflow:"hidden" }}>
+      <style>{`
+        @keyframes spin{to{transform:rotate(360deg)}}
+        @keyframes fadeUp{from{opacity:0;transform:translateY(10px)}to{opacity:1;transform:translateY(0)}}
+        @keyframes pulse{0%,100%{opacity:.3}50%{opacity:1}}
+        @keyframes shimmer{0%{opacity:.5}50%{opacity:1}100%{opacity:.5}}
+        .fadeup{animation:fadeUp .4s ease forwards}
+      `}</style>
+
+      {/* BG effects */}
+      <div style={{position:"fixed",inset:0,pointerEvents:"none",zIndex:100,backgroundImage:"repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.04) 2px,rgba(0,0,0,0.04) 4px)"}}/>
+      <div style={{position:"fixed",top:"8%",left:"4%",width:280,height:280,borderRadius:"50%",background:"radial-gradient(circle,rgba(0,207,255,0.06) 0%,transparent 70%)",pointerEvents:"none"}}/>
+      <div style={{position:"fixed",bottom:"12%",right:"6%",width:240,height:240,borderRadius:"50%",background:"radial-gradient(circle,rgba(255,68,102,0.05) 0%,transparent 70%)",pointerEvents:"none"}}/>
+
       {/* Header */}
-      <div style={{ textAlign: "center", marginBottom: 30 }}>
-        <h1 style={{ fontSize: "3rem", fontWeight: 900, background: "linear-gradient(to right, #00cfff, #ff4466)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>AGE.EXE</h1>
-        <p style={{ fontSize: "10px", letterSpacing: "2px", color: "#444" }}>X ORACLE SYSTEM v5.0</p>
+      <div style={{textAlign:"center",marginBottom:30}}>
+        <div style={{fontSize:9,letterSpacing:6,color:"#2a2a35",marginBottom:8}}>◈ X ORACLE SYSTEM v5.0 ◈</div>
+        <h1 style={{fontSize:"clamp(2.2rem,7vw,4rem)",fontWeight:900,letterSpacing:-3,margin:0,background:"linear-gradient(135deg,#00cfff 0%,#ff4466 55%,#ffcc00 100%)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",backgroundClip:"text"}}>AGE.EXE</h1>
+        <p style={{color:"#2e2e3a",fontSize:11,marginTop:7,letterSpacing:3}}>DROP YOUR PFP. FACE YOUR DIGITAL TRUTH.</p>
       </div>
 
-      {stage === STAGES.UPLOAD && (
-        <div style={{ width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", gap: 15 }}>
-          <input className="bg-gray-900 p-4 rounded border border-gray-800 outline-none focus:border-cyan-500" placeholder="@username" value={username} onChange={e => setUsername(e.target.value)} />
-          <div onClick={() => fileRef.current?.click()} style={{ border: "2px dashed #1e1e28", padding: 40, textAlign: "center", cursor: "pointer", borderRadius: 8 }}>
-            {pfpPreview ? <img src={pfpPreview} style={{ width: 80, height: 80, borderRadius: "50%", margin: "0 auto" }} /> : "Drop PFP Here"}
+      {/* UPLOAD */}
+      {stage === "upload" && (
+        <div className="fadeup" style={{width:"100%",maxWidth:420,display:"flex",flexDirection:"column",gap:14}}>
+          <div>
+            <label style={{fontSize:9,letterSpacing:3,color:"#333",display:"block",marginBottom:6}}>X USERNAME</label>
+            <div style={{display:"flex",alignItems:"center",background:"#0d0e14",border:"1px solid #1a1a24",borderRadius:4}}>
+              <span style={{padding:"12px",color:"#333",fontSize:15}}>@</span>
+              <input value={username} onChange={e=>setUsername(e.target.value)} placeholder="yourhandle"
+                onKeyDown={e=>e.key==="Enter"&&username.trim()&&pfp&&goToQuestions()}
+                style={{flex:1,background:"transparent",border:"none",outline:"none",color:"#e8e8e8",fontSize:14,padding:"12px 12px 12px 0",fontFamily:"'Courier New',monospace"}}/>
+            </div>
           </div>
-          <input type="file" ref={fileRef} hidden onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
-          <button onClick={goToQuestions} disabled={!username || !pfpPreview} style={{ background: "#00cfff", color: "black", padding: 15, fontWeight: "bold", borderRadius: 4 }}>CONTINUE</button>
+          <div>
+            <label style={{fontSize:9,letterSpacing:3,color:"#333",display:"block",marginBottom:6}}>PROFILE PICTURE</label>
+            <div onDragOver={e=>{e.preventDefault();setDragOver(true);}} onDragLeave={()=>setDragOver(false)}
+              onDrop={e=>{e.preventDefault();setDragOver(false);if(e.dataTransfer.files[0])handleFile(e.dataTransfer.files[0]);}}
+              onClick={()=>fileRef.current?.click()}
+              style={{border:dragOver?"1px solid #00cfff":"1px dashed #1e1e28",borderRadius:4,padding:pfp?16:30,textAlign:"center",cursor:"pointer",background:dragOver?"rgba(0,207,255,0.03)":"#0a0b10",transition:"all .2s"}}>
+              {pfp?(
+                <div style={{display:"flex",alignItems:"center",gap:12,justifyContent:"center"}}>
+                  <img src={pfp} alt="pfp" style={{width:60,height:60,borderRadius:"50%",objectFit:"cover",border:"2px solid #00cfff33"}}/>
+                  <div style={{textAlign:"left"}}><div style={{color:"#00cfff",fontSize:11}}>✓ PFP loaded</div><div style={{color:"#2a2a35",fontSize:9,marginTop:2}}>click to change</div></div>
+                </div>
+              ):(
+                <div><div style={{fontSize:24,marginBottom:8,opacity:.2}}>◎</div><div style={{color:"#333",fontSize:11,letterSpacing:1}}>DRAG & DROP or CLICK</div><div style={{color:"#1e1e28",fontSize:9,marginTop:3}}>JPG · PNG · WEBP</div></div>
+              )}
+            </div>
+            <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={e=>e.target.files?.[0]&&handleFile(e.target.files[0])}/>
+          </div>
+          <button onClick={goToQuestions} disabled={!username.trim()||!pfp}
+            style={{background:username.trim()&&pfp?"linear-gradient(135deg,#00cfff,#0077ff)":"#0f1018",border:"none",color:username.trim()&&pfp?"#08090d":"#222230",padding:"13px 32px",borderRadius:4,fontSize:11,fontWeight:700,letterSpacing:4,cursor:username.trim()&&pfp?"pointer":"not-allowed",fontFamily:"'Courier New',monospace",transition:"all .2s"}}>
+            CONTINUE →
+          </button>
         </div>
       )}
 
-      {stage === STAGES.QUESTIONS && (
-        <div style={{ width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", gap: 20 }}>
+      {/* QUESTIONS */}
+      {stage === "questions" && (
+        <div className="fadeup" style={{width:"100%",maxWidth:420,display:"flex",flexDirection:"column",gap:18}}>
+          <div style={{textAlign:"center"}}>
+            <div style={{fontSize:9,letterSpacing:4,color:"#2a2a35",marginBottom:5}}>STEP 2 · VIBE CHECK</div>
+            {xStatus==="loading"&&<div style={{color:"#3a3a4a",fontSize:13,animation:"pulse 1.5s infinite"}}>⟳ Scanning @{username}...</div>}
+            {xStatus==="done"&&<div style={{color:"#e8e8e8",fontSize:13}}>Live data from <span style={{color:"#00cfff"}}>@{username}</span> ✓</div>}
+            {xStatus==="failed"&&<div style={{color:"#3a3a4a",fontSize:13}}><span style={{color:"#00cfff"}}>@{username}</span> · no live data</div>}
+          </div>
           <div>
-            <p style={{ fontSize: 10, color: "#555", marginBottom: 10 }}>SELECT VIBE</p>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-              {VIBES.map(v => (
-                <button key={v} onClick={() => setVibe(v)} style={{ padding: "5px 10px", fontSize: 10, border: vibe === v ? "1px solid #00cfff" : "1px solid #222", color: vibe === v ? "#00cfff" : "#555" }}>{v}</button>
+            <label style={{fontSize:9,letterSpacing:3,color:"#2a2a35",display:"block",marginBottom:8}}>YOUR X VIBE</label>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {VIBES.map(v=>(
+                <button key={v} onClick={()=>setVibe(v)} style={{padding:"6px 11px",borderRadius:2,fontSize:10,cursor:"pointer",fontFamily:"'Courier New',monospace",letterSpacing:1,background:vibe===v?"rgba(0,207,255,0.1)":"#0d0e14",border:vibe===v?"1px solid #00cfff":"1px solid #1a1a24",color:vibe===v?"#00cfff":"#3a3a4a",transition:"all .12s"}}>{v}</button>
               ))}
             </div>
           </div>
-          <button onClick={analyzeAge} style={{ background: "#ff4466", color: "white", padding: 15, fontWeight: "bold" }}>REVEAL MY AGE</button>
-        </div>
-      )}
-
-      {stage === STAGES.ANALYZING && (
-        <div style={{ textAlign: "center" }}>
-          <div className="animate-spin text-4xl mb-4">◎</div>
-          <p>{analyzeStep}</p>
-        </div>
-      )}
-
-      {stage === STAGES.RESULT && result && (
-        <div style={{ width: "100%", maxWidth: 500 }}>
-          <div ref={cardRef} style={{ background: "#0d0e14", border: `2px solid ${ac}`, borderRadius: 12, overflow: "hidden" }}>
-             <div style={{ display: "flex" }}>
-                <img src={agedImage || ""} style={{ width: 200, height: 300, objectFit: "cover" }} />
-                <div style={{ padding: 20, flex: 1 }}>
-                   <h2 style={{ fontSize: "5rem", fontWeight: 900, color: ac }}>{result.predicted_age}</h2>
-                   <p style={{ fontSize: 10, color: "#555" }}>{result.age_era}</p>
-                   <div style={{ marginTop: 20 }}>
-                      <p style={{ fontSize: 12 }}>"{result.roast}"</p>
-                   </div>
-                </div>
-             </div>
+          <div>
+            <label style={{fontSize:9,letterSpacing:3,color:"#2a2a35",display:"block",marginBottom:8}}>YOU MOSTLY TWEET ABOUT</label>
+            <div style={{display:"flex",flexWrap:"wrap",gap:6}}>
+              {TWEET_TOPICS.map(t=>(
+                <button key={t} onClick={()=>setTopic(t)} style={{padding:"6px 11px",borderRadius:2,fontSize:10,cursor:"pointer",fontFamily:"'Courier New',monospace",letterSpacing:1,background:topic===t?"rgba(255,68,102,0.1)":"#0d0e14",border:topic===t?"1px solid #ff4466":"1px solid #1a1a24",color:topic===t?"#ff4466":"#3a3a4a",transition:"all .12s"}}>{t}</button>
+              ))}
+            </div>
           </div>
-          <button onClick={downloadCard} style={{ width: "100%", marginTop: 20, background: ac, color: "black", padding: 15, fontWeight: "bold" }}>DOWNLOAD ID CARD</button>
-          <button onClick={() => setStage(STAGES.UPLOAD)} style={{ width: "100%", marginTop: 10, color: "#555", fontSize: 10 }}>RUN AGAIN</button>
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={()=>setStage("upload")} style={{flex:1,background:"transparent",border:"1px solid #1a1a24",color:"#333",padding:"11px",borderRadius:4,fontSize:10,cursor:"pointer",fontFamily:"'Courier New',monospace",letterSpacing:2}}>← BACK</button>
+            <button onClick={runOracle} style={{flex:2,background:"linear-gradient(135deg,#ff4466,#ff8c42)",border:"none",color:"#fff",padding:"11px",borderRadius:4,fontSize:11,fontWeight:700,letterSpacing:3,cursor:"pointer",fontFamily:"'Courier New',monospace"}}>REVEAL MY AGE ⚡</button>
+          </div>
         </div>
       )}
+
+      {/* LOADING */}
+      {stage === "loading" && (
+        <div style={{textAlign:"center"}}>
+          <div style={{fontSize:38,marginBottom:22,animation:"spin 2s linear infinite",display:"inline-block",color:"#00cfff",opacity:.5}}>◎</div>
+          <div style={{fontSize:11,letterSpacing:4,color:"#00cfff",marginBottom:10}}>ORACLE PROCESSING</div>
+          <div style={{fontSize:10,color:"#3a3a4a",letterSpacing:2,animation:"shimmer 1.5s infinite"}}>{loadingStep}</div>
+        </div>
+      )}
+
+      {/* RESULT */}
+      {stage === "result" && result && (
+        <div className="fadeup" style={{width:"100%",maxWidth:380,display:"flex",flexDirection:"column",gap:10}}>
+          {fromCache&&<div style={{textAlign:"center",fontSize:9,letterSpacing:3,color:"#2a6644",padding:"5px 12px",background:"rgba(0,255,136,0.05)",border:"1px solid rgba(0,255,136,0.1)",borderRadius:3}}>◈ SAME INPUTS · ORACLE LOCKED · CONSISTENT RESULT</div>}
+
+          <div ref={cardRef} style={{background:"#08090d",padding:14,borderRadius:10}}>
+            <div style={{background:"#0d0e14",border:`1px solid ${ac}20`,borderRadius:8,overflow:"hidden",boxShadow:`0 0 40px ${ac}10`}}>
+
+              {/* Header */}
+              <div style={{background:`linear-gradient(90deg,${ac}14,transparent 60%)`,borderBottom:`1px solid ${ac}12`,padding:"7px 14px",display:"flex",justifyContent:"space-between"}}>
+                <span style={{fontSize:8,letterSpacing:5,color:"#1e1e28"}}>X ORACLE // DIGITAL ID</span>
+                <span style={{fontSize:8,letterSpacing:2,color:"#1e1e28"}}>CONF: {result.confidence}</span>
+              </div>
+
+              {/* Aged portrait — full body AI image */}
+              <div style={{position:"relative",width:"100%",aspectRatio:"2/3",background:"#0a0b10",overflow:"hidden"}}>
+                {imgStatus==="loading"&&(
+                  <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:8}}>
+                    <div style={{fontSize:24,animation:"spin 2s linear infinite",color:"#00cfff",opacity:.4}}>◎</div>
+                    <div style={{fontSize:9,color:"#2a2a35",letterSpacing:2,animation:"shimmer 1.5s infinite"}}>generating aged portrait...</div>
+                  </div>
+                )}
+                {agedImg?(
+                  <img src={agedImg} alt="aged portrait" style={{width:"100%",height:"100%",objectFit:"cover",display:"block"}}/>
+                ):imgStatus==="failed"?(
+                  <div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    <img src={pfp||""} alt="pfp" style={{width:"100%",height:"100%",objectFit:"cover",filter:"saturate(.5) brightness(.7)"}}/>
+                  </div>
+                ):null}
+
+                {/* Age stamp overlay */}
+                <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(8,9,13,0.95))",padding:"30px 14px 12px"}}>
+                  <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                    <span style={{fontSize:"3.2rem",fontWeight:900,color:ac,lineHeight:1,letterSpacing:-3}}>{result.predicted_age}</span>
+                    <span style={{fontSize:9,color:"#2e2e3a",letterSpacing:2}}>YRS</span>
+                  </div>
+                  <div style={{fontSize:9,color:"#3a3a4a",letterSpacing:2,textTransform:"uppercase",marginTop:2}}>{result.age_era}</div>
+                  <div style={{fontSize:10,color:"#2a2a35",marginTop:2}}>@{username} · {result.pfp_energy}</div>
+                </div>
+              </div>
+
+              {/* Stats */}
+              <div style={{padding:"12px 14px",display:"flex",flexDirection:"column",gap:8}}>
+                <div><div style={{fontSize:7,letterSpacing:3,color:"#1e1e28",marginBottom:2}}>X DIAGNOSIS</div><div style={{fontSize:11,color:"#555"}}>{result.x_diagnosis}</div></div>
+                <div><div style={{fontSize:7,letterSpacing:3,color:"#1e1e28",marginBottom:2}}>SECRET TRAIT</div><div style={{fontSize:11,color:"#444",fontStyle:"italic"}}>{result.secret_trait}</div></div>
+              </div>
+
+              {/* Roast */}
+              <div style={{borderTop:"1px solid #0e0f18",padding:"10px 14px",background:"#080910",display:"flex",alignItems:"center",gap:8}}>
+                <span style={{fontSize:7,letterSpacing:3,color:"#1e1e28",whiteSpace:"nowrap"}}>◈ ORACLE:</span>
+                <span style={{fontSize:12,color:"#ccc",fontStyle:"italic"}}>"{result.roast}"</span>
+              </div>
+
+              <div style={{padding:"5px 14px",background:"#060709",display:"flex",justifyContent:"space-between"}}>
+                <span style={{fontSize:7,color:"#111118",letterSpacing:3}}>AGE.EXE · X ORACLE</span>
+                <span style={{fontSize:7,color:"#111118",letterSpacing:2}}>ENTERTAINMENT ONLY</span>
+              </div>
+            </div>
+          </div>
+
+          <div style={{display:"flex",gap:8}}>
+            <button onClick={downloadCard} disabled={downloading}
+              style={{flex:2,background:`linear-gradient(135deg,${ac}18,${ac}0c)`,border:`1px solid ${ac}40`,color:ac,padding:"12px",borderRadius:4,fontSize:10,fontWeight:700,cursor:"pointer",letterSpacing:3,fontFamily:"'Courier New',monospace",transition:"all .2s"}}>
+              {downloading?"⟳ SAVING...":"↓ DOWNLOAD CARD"}
+            </button>
+            <button onClick={reset}
+              style={{flex:1,background:"transparent",border:"1px solid #1a1a24",color:"#333",padding:"12px",borderRadius:4,fontSize:10,cursor:"pointer",letterSpacing:3,fontFamily:"'Courier New',monospace"}}>
+              ← RUN AGAIN
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div style={{marginTop:36,fontSize:8,color:"#111118",letterSpacing:3,textAlign:"center"}}>FOR ENTERTAINMENT ONLY · X ORACLE AI</div>
     </main>
   );
 }
