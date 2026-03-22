@@ -4,6 +4,7 @@ export async function POST(req: NextRequest) {
   try {
     const { username, pfpBase64, mediaType, vibe, tweetTopic, xProfile } = await req.json();
 
+    // Ensure your Vercel Environment Variable is named GEMINI_API_KEY
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return NextResponse.json({ error: "No Gemini API key configured" }, { status: 500 });
 
@@ -34,22 +35,37 @@ ROAST: Must reference something SPECIFIC you can SEE in this image. No generic r
 Good: "Rainbow glasses on an ape pfp — bold life choice.", "Pixel art pfp in 2024, screaming nostalgia.", "Anime villain arc but bio says God first."
 Bad: "Posts at 2am", "chronically online" — too generic, banned.
 
-IMPORTANT: Your response must be valid JSON. Do NOT use newlines or line breaks inside any string values. Keep all strings on one line.
+Return ONLY a JSON object with these exact keys:
+{
+  "predicted_age": number (16-68),
+  "confidence": "Low" | "Medium" | "High",
+  "age_era": string (5 words max),
+  "roast": string (specific to image, 8-14 words),
+  "pfp_energy": string (3-4 words),
+  "x_diagnosis": string (8 words max),
+  "secret_trait": string (7 words max),
+  "aged_portrait_prompt": string (one line description of this person aged to predicted_age, full body)
+}`;
 
-Return ONLY this JSON object, nothing else:
-{"predicted_age": <integer 16-68>,"confidence": "Low|Medium|High","age_era": "<5 words max>","roast": "<specific to this image, 8-14 words>","pfp_energy": "<3-4 words>","x_diagnosis": "<8 words max>","secret_trait": "<7 words max>","aged_portrait_prompt": "<one line description of this person aged to predicted_age, full body>"}`;
-
+    // Note: Changed to gemini-1.5-flash as 2.5 is not a standard release yet
     const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`,
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ parts: [
-            { inline_data: { mime_type: mediaType, data: pfpBase64 } },
-            { text: prompt }
-          ]}],
-          generationConfig: { temperature: 0.9, maxOutputTokens: 1024 }
+          contents: [{ 
+            parts: [
+              { inline_data: { mime_type: mediaType || "image/png", data: pfpBase64 } },
+              { text: prompt }
+            ]
+          }],
+          generationConfig: { 
+            temperature: 0.8, 
+            maxOutputTokens: 1024,
+            // Forces Gemini to output valid JSON structure
+            response_mime_type: "application/json" 
+          }
         }),
       }
     );
@@ -67,28 +83,32 @@ Return ONLY this JSON object, nothing else:
       return NextResponse.json({ error: "Empty response from Gemini" }, { status: 500 });
     }
 
-    // Extract JSON object from response
-    const jsonStart = text.indexOf("{");
-    const jsonEnd = text.lastIndexOf("}");
-    if (jsonStart === -1 || jsonEnd === -1) {
-      console.error("No JSON braces found:", text.slice(0, 300));
-      return NextResponse.json({ error: "No JSON in response" }, { status: 500 });
+    // Robust JSON Extraction
+    try {
+      const jsonStart = text.indexOf("{");
+      const jsonEnd = text.lastIndexOf("}");
+      
+      if (jsonStart === -1 || jsonEnd === -1) {
+        throw new Error("JSON markers not found in AI response");
+      }
+
+      let jsonStr = text.slice(jsonStart, jsonEnd + 1);
+      
+      // Sanitizing control characters that break JSON.parse
+      jsonStr = jsonStr.replace(/[\u0000-\u001F\u007F-\u009F]/g, "");
+
+      const parsed = JSON.parse(jsonStr);
+      
+      // Normalize predicted_age
+      const age = parseInt(parsed.predicted_age);
+      parsed.predicted_age = (!isNaN(age) && age >= 16 && age <= 68) ? age : 26;
+
+      return NextResponse.json({ result: parsed });
+    } catch (parseError) {
+      console.error("Failed to parse JSON string:", text);
+      return NextResponse.json({ error: "AI output was not valid JSON", raw: text }, { status: 500 });
     }
 
-    let jsonStr = text.slice(jsonStart, jsonEnd + 1);
-
-    // Fix unescaped newlines inside JSON strings — the main cause of parse failures
-    // Replace actual newline characters inside string values with a space
-    jsonStr = jsonStr.replace(/"([^"]*)"/g, (_match: string, inner: string) => {
-      const fixed = inner.replace(/\n/g, " ").replace(/\r/g, "").replace(/\t/g, " ");
-      return `"${fixed}"`;
-    });
-
-    const parsed = JSON.parse(jsonStr);
-    const age = parseInt(parsed.predicted_age);
-    parsed.predicted_age = (!isNaN(age) && age >= 16 && age <= 68) ? age : 26;
-
-    return NextResponse.json({ result: parsed });
   } catch (err) {
     console.error("Analyze route error:", err);
     return NextResponse.json({ error: String(err) }, { status: 500 });
