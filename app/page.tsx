@@ -1,187 +1,241 @@
 "use client";
+import { useState, useRef, useCallback } from "react";
 
-import { useState, useRef } from "react";
-import html2canvas from "html2canvas";
+const STAGES = { UPLOAD: "upload", QUESTIONS: "questions", ANALYZING: "analyzing", RESULT: "result" };
+const VIBES = ["Main Character", "NPC Energy", "Chronically Online", "Lurker", "Clout Chaser", "Thought Leader", "Doomscroller"];
+const TWEET_TOPICS = ["Hot Takes", "Memes Only", "News & Politics", "Tech & AI", "Sports", "Fan Accounts", "Self-promo"];
+
+async function buildCacheKey(username: string, pfpPreview: string, vibe: string, topic: string) {
+  const img = pfpPreview || "";
+  const len = img.length;
+  const fingerprint = img.slice(0, 120)
+    + img.slice(Math.floor(len * 0.45), Math.floor(len * 0.45) + 120)
+    + img.slice(Math.max(0, len - 120));
+  const raw = `${username.toLowerCase().trim()}::${fingerprint}::${vibe}::${topic}`;
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(raw));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, "0")).join("").slice(0, 32);
+}
+
+const RESULT_CACHE: Record<string, { result: AnalysisResult; agedImage: string | null }> = {};
+
+interface AnalysisResult {
+  predicted_age: number;
+  confidence: string;
+  age_era: string;
+  roast: string;
+  pfp_energy: string;
+  x_diagnosis: string;
+  secret_trait: string;
+  aged_portrait_prompt?: string;
+}
+
+function getColor(age: number) {
+  if (age < 22) return "#00ff88";
+  if (age < 30) return "#00cfff";
+  if (age < 40) return "#ffcc00";
+  if (age < 52) return "#ff8c42";
+  return "#ff4466";
+}
 
 export default function Home() {
+  const [stage, setStage] = useState(STAGES.UPLOAD);
   const [username, setUsername] = useState("");
-  const [pfp, setPfp] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<any>(null);
-  const [agedImg, setAgedImg] = useState<string | null>(null);
+  const [pfpFile, setPfpFile] = useState<File | null>(null);
+  const [pfpPreview, setPfpPreview] = useState<string | null>(null);
+  const [vibe, setVibe] = useState("");
+  const [tweetTopic, setTweetTopic] = useState("");
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [dragOver, setDragOver] = useState(false);
+  const [xProfile, setXProfile] = useState<any>(null);
+  const [xStatus, setXStatus] = useState<"idle" | "loading" | "done" | "failed">("idle");
+  const [analyzeStep, setAnalyzeStep] = useState("");
+  const [agedImage, setAgedImage] = useState<string | null>(null);
+  const [imageStatus, setImageStatus] = useState<"idle" | "loading" | "done" | "failed">("idle");
+  const [fromCache, setFromCache] = useState(false);
+  const [downloading, setDownloading] = useState(false);
   const cardRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
 
-  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      const reader = new FileReader();
-      reader.onload = (ev) => setPfp(ev.target?.result as string);
-      reader.readAsDataURL(e.target.files[0]);
+  const handleFile = useCallback((file: File) => {
+    if (!file || !file.type.startsWith("image/")) return;
+    setPfpFile(file);
+    const reader = new FileReader();
+    reader.onload = (e) => setPfpPreview(e.target?.result as string);
+    reader.readAsDataURL(file);
+  }, []);
+
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault(); setDragOver(false);
+    if (e.dataTransfer.files[0]) handleFile(e.dataTransfer.files[0]);
+  };
+
+  const goToQuestions = async () => {
+    if (!username.trim() || !pfpFile) return;
+    setStage(STAGES.QUESTIONS);
+    setXStatus("loading");
+    try {
+      const res = await fetch("/api/x-agent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username }),
+      });
+      const data = await res.json();
+      if (data.profile) {
+        setXProfile(data.profile);
+        setXStatus("done");
+      } else {
+        setXStatus("failed");
+      }
+    } catch {
+      setXStatus("failed");
     }
   };
 
-  const runOracle = async () => {
-    if (!username || !pfp) return alert("Enter handle and upload PFP first!");
+  const createCanvasPortrait = (imgSrc: string, age: number): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        const W = 320, H = 480;
+        const canvas = document.createElement("canvas");
+        canvas.width = W; canvas.height = H;
+        const ctx = canvas.getContext("2d")!;
+        const bg = ctx.createLinearGradient(0, 0, 0, H);
+        bg.addColorStop(0, "#0a0b10"); bg.addColorStop(1, "#050608");
+        ctx.fillStyle = bg; ctx.fillRect(0, 0, W, H);
+        ctx.save();
+        ctx.beginPath(); ctx.roundRect(40, 60, 240, 290, 4); ctx.clip();
+        ctx.drawImage(img, 40, 60, 240, 290);
+        ctx.restore();
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.src = imgSrc;
+    });
+  };
+
+  const analyzeAge = async () => {
+    if (!pfpPreview || !pfpFile) return;
+    setStage(STAGES.ANALYZING);
+    setAnalyzeStep("Dialing the Oracle...");
     
-    setLoading(true);
     try {
-      // 1. Get Analysis from Gemini
+      const cacheKey = await buildCacheKey(username, pfpPreview, vibe, tweetTopic);
+      if (RESULT_CACHE[cacheKey]) {
+        setResult(RESULT_CACHE[cacheKey].result);
+        setAgedImage(RESULT_CACHE[cacheKey].agedImage);
+        setFromCache(true);
+        setStage(STAGES.RESULT);
+        return;
+      }
+
       const res = await fetch("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ 
           username, 
-          pfpBase64: pfp.split(",")[1], 
-          vibe: "Main Character", 
-          tweetTopic: "Tech" 
+          pfpBase64: pfpPreview.split(",")[1], 
+          vibe, 
+          tweetTopic 
         }),
       });
-      const data = await res.json();
       
-      if (data.error) throw new Error(data.error);
+      const data = await res.json();
+      if (!data.result) throw new Error("Analysis failed");
+      
       setResult(data.result);
+      setAnalyzeStep("Generating Aged Portrait...");
 
-      // 2. Generate Aged Portrait from Flux
       const imgRes = await fetch("/api/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt: data.result.aged_portrait_prompt }),
       });
-      const imgData = await imgRes.json();
       
-      if (imgData.imageBase64) {
-        setAgedImg(imgData.imageBase64);
-      }
-    } catch (err: any) {
+      const imgData = await imgRes.json();
+      const finalImg = imgData.imageBase64 || await createCanvasPortrait(pfpPreview, data.result.predicted_age);
+      
+      setAgedImage(finalImg);
+      RESULT_CACHE[cacheKey] = { result: data.result, agedImage: finalImg };
+      setStage(STAGES.RESULT);
+    } catch (err) {
       console.error(err);
-      alert(`Oracle Error: ${err.message}`);
+      setStage(STAGES.UPLOAD);
+      alert("System Crash. Try again.");
     }
-    setLoading(false);
   };
 
   const downloadCard = async () => {
     if (!cardRef.current) return;
-    try {
-      const canvas = await html2canvas(cardRef.current, {
-        backgroundColor: "#000000",
-        useCORS: true,
-      });
-      const link = document.createElement("a");
-      link.download = `${username}-digital-age.png`;
-      link.href = canvas.toDataURL("image/png");
-      link.click();
-    } catch (err) {
-      alert("Failed to save image. Try taking a screenshot!");
-    }
+    setDownloading(true);
+    const html2canvas = (await import("html2canvas")).default;
+    const canvas = await html2canvas(cardRef.current, { backgroundColor: "#08090d" });
+    const link = document.createElement("a");
+    link.download = `oracle-${username}.png`;
+    link.href = canvas.toDataURL();
+    link.click();
+    setDownloading(false);
   };
 
+  const ac = result ? getColor(result.predicted_age) : "#00cfff";
+
   return (
-    <main className="min-h-screen bg-black text-white p-6 flex flex-col items-center justify-center font-mono">
-      {/* Background Glow */}
-      <div className="fixed inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-cyan-900/20 via-black to-black -z-10" />
-
-      <div className="text-center mb-10">
-        <h1 className="text-5xl font-black tracking-tighter text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-600">
-          AGE.EXE
-        </h1>
-        <p className="text-[10px] tracking-[0.3em] text-cyan-800 uppercase mt-2">Digital Age Oracle v2.5</p>
+    <main style={{ minHeight: "100vh", background: "#08090d", fontFamily: "'Courier New',monospace", color: "#e8e8e8", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "20px" }}>
+      {/* Header */}
+      <div style={{ textAlign: "center", marginBottom: 30 }}>
+        <h1 style={{ fontSize: "3rem", fontWeight: 900, background: "linear-gradient(to right, #00cfff, #ff4466)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>AGE.EXE</h1>
+        <p style={{ fontSize: "10px", letterSpacing: "2px", color: "#444" }}>X ORACLE SYSTEM v5.0</p>
       </div>
-      
-      {!result ? (
-        <div className="flex flex-col gap-6 w-full max-w-xs p-8 border border-gray-800 bg-gray-900/50 backdrop-blur-md rounded-2xl">
-          <div className="space-y-1">
-            <label className="text-[10px] text-gray-500 uppercase ml-1">X Handle</label>
-            <input 
-              className="w-full bg-black p-3 border border-gray-800 text-white rounded-lg focus:border-cyan-500 outline-none transition-all" 
-              placeholder="@username" 
-              value={username}
-              onChange={e => setUsername(e.target.value)} 
-            />
+
+      {stage === STAGES.UPLOAD && (
+        <div style={{ width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", gap: 15 }}>
+          <input className="bg-gray-900 p-4 rounded border border-gray-800 outline-none focus:border-cyan-500" placeholder="@username" value={username} onChange={e => setUsername(e.target.value)} />
+          <div onClick={() => fileRef.current?.click()} style={{ border: "2px dashed #1e1e28", padding: 40, textAlign: "center", cursor: "pointer", borderRadius: 8 }}>
+            {pfpPreview ? <img src={pfpPreview} style={{ width: 80, height: 80, borderRadius: "50%", margin: "0 auto" }} /> : "Drop PFP Here"}
           </div>
-
-          <div className="space-y-1">
-            <label className="text-[10px] text-gray-500 uppercase ml-1">Profile Photo</label>
-            <div className="relative group">
-              <input 
-                type="file" 
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10" 
-                onChange={handleUpload} 
-              />
-              <div className="w-full bg-black p-4 border border-dashed border-gray-700 rounded-lg text-center text-xs text-gray-500 group-hover:border-cyan-500 transition-all">
-                {pfp ? "✓ Image Loaded" : "Click to Upload PFP"}
-              </div>
-            </div>
-          </div>
-
-          <button 
-            onClick={runOracle} 
-            disabled={loading || !username || !pfp} 
-            className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:bg-gray-800 text-white p-4 rounded-lg font-bold text-sm shadow-[0_0_15px_rgba(6,182,212,0.4)] transition-all active:scale-95"
-          >
-            {loading ? "CONSULTING ORACLE..." : "REVEAL MY TRUTH"}
-          </button>
-        </div>
-      ) : (
-        <div className="flex flex-col items-center gap-8 animate-in fade-in zoom-in duration-500">
-          <div 
-            ref={cardRef} 
-            className="bg-black p-6 border-2 border-cyan-500/50 rounded-2xl max-w-[320px] text-center shadow-[0_0_40px_rgba(6,182,212,0.2)]"
-          >
-            <div className="relative aspect-square mb-6 overflow-hidden rounded-xl border border-gray-800">
-              <img 
-                src={agedImg || pfp || ""} 
-                alt="Aged Portrait"
-                className="w-full h-full object-cover" 
-              />
-              <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-black to-transparent p-4">
-                <p className="text-cyan-400 text-xs font-bold">@{username}</p>
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <p className="text-[10px] text-cyan-500/70 tracking-widest uppercase">Predicted Digital Age</p>
-              <h2 className="text-7xl font-black text-white tracking-tighter">{result.predicted_age}</h2>
-            </div>
-
-            <p className="text-sm my-6 text-gray-300 italic px-4 leading-relaxed">
-              "{result.roast}"
-            </p>
-
-            <div className="text-left text-[9px] space-y-3 border-t border-gray-900 pt-6 mt-2">
-              <div className="flex justify-between">
-                <span className="text-gray-500 uppercase">Generation Era:</span>
-                <span className="text-cyan-400 font-bold">{result.age_era}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500 uppercase">Diagnosis:</span>
-                <span className="text-white">{result.x_diagnosis}</span>
-              </div>
-              <div className="flex justify-between">
-                <span className="text-gray-500 uppercase">Secret Trait:</span>
-                <span className="text-white">{result.secret_trait}</span>
-              </div>
-            </div>
-          </div>
-          
-          <div className="flex gap-4">
-            <button 
-              onClick={downloadCard} 
-              className="bg-white text-black px-8 py-3 rounded-full font-bold text-xs uppercase hover:bg-cyan-400 transition-colors shadow-lg"
-            >
-              Save Identity
-            </button>
-            <button 
-              onClick={() => window.location.reload()} 
-              className="bg-gray-900 text-gray-400 px-8 py-3 rounded-full font-bold text-xs uppercase hover:text-white transition-colors"
-            >
-              Reset
-            </button>
-          </div>
+          <input type="file" ref={fileRef} hidden onChange={e => e.target.files?.[0] && handleFile(e.target.files[0])} />
+          <button onClick={goToQuestions} disabled={!username || !pfpPreview} style={{ background: "#00cfff", color: "black", padding: 15, fontWeight: "bold", borderRadius: 4 }}>CONTINUE</button>
         </div>
       )}
 
-      <footer className="fixed bottom-6 text-[8px] text-gray-700 tracking-[0.5em] uppercase">
-        Encrypted Connection Established
-      </footer>
+      {stage === STAGES.QUESTIONS && (
+        <div style={{ width: "100%", maxWidth: 400, display: "flex", flexDirection: "column", gap: 20 }}>
+          <div>
+            <p style={{ fontSize: 10, color: "#555", marginBottom: 10 }}>SELECT VIBE</p>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+              {VIBES.map(v => (
+                <button key={v} onClick={() => setVibe(v)} style={{ padding: "5px 10px", fontSize: 10, border: vibe === v ? "1px solid #00cfff" : "1px solid #222", color: vibe === v ? "#00cfff" : "#555" }}>{v}</button>
+              ))}
+            </div>
+          </div>
+          <button onClick={analyzeAge} style={{ background: "#ff4466", color: "white", padding: 15, fontWeight: "bold" }}>REVEAL MY AGE</button>
+        </div>
+      )}
+
+      {stage === STAGES.ANALYZING && (
+        <div style={{ textAlign: "center" }}>
+          <div className="animate-spin text-4xl mb-4">◎</div>
+          <p>{analyzeStep}</p>
+        </div>
+      )}
+
+      {stage === STAGES.RESULT && result && (
+        <div style={{ width: "100%", maxWidth: 500 }}>
+          <div ref={cardRef} style={{ background: "#0d0e14", border: `2px solid ${ac}`, borderRadius: 12, overflow: "hidden" }}>
+             <div style={{ display: "flex" }}>
+                <img src={agedImage || ""} style={{ width: 200, height: 300, objectFit: "cover" }} />
+                <div style={{ padding: 20, flex: 1 }}>
+                   <h2 style={{ fontSize: "5rem", fontWeight: 900, color: ac }}>{result.predicted_age}</h2>
+                   <p style={{ fontSize: 10, color: "#555" }}>{result.age_era}</p>
+                   <div style={{ marginTop: 20 }}>
+                      <p style={{ fontSize: 12 }}>"{result.roast}"</p>
+                   </div>
+                </div>
+             </div>
+          </div>
+          <button onClick={downloadCard} style={{ width: "100%", marginTop: 20, background: ac, color: "black", padding: 15, fontWeight: "bold" }}>DOWNLOAD ID CARD</button>
+          <button onClick={() => setStage(STAGES.UPLOAD)} style={{ width: "100%", marginTop: 10, color: "#555", fontSize: 10 }}>RUN AGAIN</button>
+        </div>
+      )}
     </main>
   );
 }
