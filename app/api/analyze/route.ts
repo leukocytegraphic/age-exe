@@ -1,3 +1,4 @@
+export const maxDuration = 60; // Sets the timeout to 60 seconds
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { NextResponse } from "next/server";
 
