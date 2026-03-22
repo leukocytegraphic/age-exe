@@ -269,89 +269,81 @@ export default function Home() {
 
       {/* RESULT */}
       {stage === "result" && result && (
-        <div className="fadeup" style={{width:"100%",maxWidth:380,display:"flex",flexDirection:"column",gap:10}}>
+        <div className="fadeup" style={{width:"100%",maxWidth:680,display:"flex",flexDirection:"column",gap:10}}>
           {fromCache&&<div style={{textAlign:"center",fontSize:9,letterSpacing:3,color:"#2a6644",padding:"5px 12px",background:"rgba(0,255,136,0.05)",border:"1px solid rgba(0,255,136,0.1)",borderRadius:3}}>◈ SAME INPUTS · ORACLE LOCKED · CONSISTENT RESULT</div>}
 
-          <div ref={cardRef} style={{background:"#08090d",padding:16,borderRadius:12}}>
-            <div style={{width:640,background:"#0d0e14",border:"1px solid rgba(0,207,255,0.2)",borderRadius:10,overflow:"hidden",fontFamily:"'Courier New',monospace"}}>
+          <div ref={cardRef} style={{background:"#08090d",padding:12,borderRadius:12,width:"100%",maxWidth:640}}>
+            <div style={{background:"#0d0e14",border:"1px solid rgba(0,207,255,0.2)",borderRadius:10,overflow:"hidden",fontFamily:"'Courier New',monospace",width:"100%"}}>
 
               {/* Header */}
-              <div style={{background:"linear-gradient(90deg,rgba(0,207,255,0.08),transparent)",borderBottom:"1px solid rgba(0,207,255,0.1)",padding:"8px 18px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-                <span style={{fontSize:9,letterSpacing:4,color:"#333a4a"}}>X ORACLE // DIGITAL ID</span>
+              <div style={{background:"linear-gradient(90deg,rgba(0,207,255,0.08),transparent)",borderBottom:"1px solid rgba(0,207,255,0.1)",padding:"8px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <span style={{fontSize:9,letterSpacing:3,color:"#333a4a"}}>X ORACLE // DIGITAL ID</span>
                 <span style={{fontSize:9,letterSpacing:2,color:"#333a4a"}}>CONF: {result.confidence}</span>
               </div>
 
-              {/* Body */}
-              <div style={{display:"flex",height:420}}>
+              {/* Image — full width, fixed height, no cropping issues */}
+              <div style={{position:"relative",width:"100%",height:320,overflow:"hidden",background:"#0a0b10"}}>
+                {imgStatus==="loading" && (
+                  <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:10,zIndex:2,background:"#0a0b10"}}>
+                    <div style={{fontSize:28,animation:"spin 2s linear infinite",color:"#00cfff",opacity:.3}}>◎</div>
+                    <div style={{fontSize:9,color:"#2a3040",letterSpacing:2,animation:"shimmer 1.5s infinite",textAlign:"center"}}>generating aged portrait...</div>
+                  </div>
+                )}
+                <img
+                  src={agedImg || pfp || ""}
+                  alt="portrait"
+                  style={{width:"100%",height:"100%",objectFit:"cover",objectPosition:"top center",display:"block",filter:agedImg?"none":"saturate(.4) brightness(.6)"}}
+                />
+                {/* Gradient overlay at bottom of image */}
+                <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(8,9,13,0.98))",padding:"60px 16px 14px"}}>
+                  <div style={{display:"flex",alignItems:"baseline",gap:6}}>
+                    <span style={{fontSize:"3.2rem",fontWeight:900,color:ac,lineHeight:1,letterSpacing:-3}}>{result.predicted_age}</span>
+                    <span style={{fontSize:10,color:"#2e3a4a",letterSpacing:2}}>YRS</span>
+                  </div>
+                  <div style={{fontSize:8,color:"#3a4a5a",letterSpacing:2,textTransform:"uppercase",marginTop:3}}>{result.age_era}</div>
+                </div>
+              </div>
 
-                {/* LEFT — portrait image */}
-                <div style={{width:280,flexShrink:0,position:"relative",overflow:"hidden",borderRight:"1px solid rgba(0,207,255,0.1)"}}>
-                  {imgStatus==="loading" && (
-                    <div style={{position:"absolute",inset:0,display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:10,zIndex:2,background:"#0d0e14"}}>
-                      <div style={{fontSize:28,animation:"spin 2s linear infinite",color:"#00cfff",opacity:.3}}>◎</div>
-                      <div style={{fontSize:9,color:"#2a3040",letterSpacing:2,animation:"shimmer 1.5s infinite",textAlign:"center"}}>generating<br/>aged portrait...</div>
+              {/* Details — full width below image, all fields visible */}
+              <div style={{padding:"18px 18px 14px",display:"flex",flexDirection:"column",gap:14}}>
+
+                {/* Username + energy row */}
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",paddingBottom:12,borderBottom:"1px solid rgba(0,207,255,0.08)"}}>
+                  <div>
+                    <div style={{fontSize:14,color:"#00cfff",letterSpacing:1,fontWeight:700}}>@{username}</div>
+                    <div style={{fontSize:10,color:"#2a3040",letterSpacing:1,marginTop:3}}>{result.pfp_energy}</div>
+                  </div>
+                  {xProfile && (xProfile as {join_year?:number}).join_year && (
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:8,letterSpacing:3,color:"#1e2535",marginBottom:3}}>ON X SINCE</div>
+                      <div style={{fontSize:11,color:"#3a4a5a"}}>{(xProfile as {join_year?:number}).join_year}</div>
                     </div>
                   )}
-                  <img
-                    src={agedImg || pfp || ""}
-                    alt="portrait"
-                    style={{width:"100%",height:"100%",objectFit:"cover",display:"block",filter:agedImg?"none":"saturate(.4) brightness(.6)"}}
-                  />
-                  {/* Age stamp at bottom of image */}
-                  <div style={{position:"absolute",bottom:0,left:0,right:0,background:"linear-gradient(transparent,rgba(8,9,13,0.98))",padding:"40px 16px 14px"}}>
-                    <div style={{display:"flex",alignItems:"baseline",gap:6}}>
-                      <span style={{fontSize:"3.4rem",fontWeight:900,color:ac,lineHeight:1,letterSpacing:-3}}>{result.predicted_age}</span>
-                      <span style={{fontSize:10,color:"#2e3a4a",letterSpacing:2}}>YRS</span>
-                    </div>
-                    <div style={{fontSize:8,color:"#3a4a5a",letterSpacing:2,textTransform:"uppercase",marginTop:3}}>{result.age_era}</div>
+                </div>
+
+                {/* Diagnosis + Secret trait — side by side on wide, stacked on narrow */}
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+                  <div>
+                    <div style={{fontSize:8,letterSpacing:3,color:"#1e2535",marginBottom:4}}>X DIAGNOSIS</div>
+                    <div style={{fontSize:11,color:"#556070",lineHeight:1.5}}>{result.x_diagnosis}</div>
+                  </div>
+                  <div>
+                    <div style={{fontSize:8,letterSpacing:3,color:"#1e2535",marginBottom:4}}>SECRET TRAIT</div>
+                    <div style={{fontSize:11,color:"#445060",fontStyle:"italic",lineHeight:1.5}}>{result.secret_trait}</div>
                   </div>
                 </div>
 
-                {/* RIGHT — all details */}
-                <div style={{flex:1,display:"flex",flexDirection:"column",padding:"20px 18px"}}>
-
-                  {/* Username + energy */}
-                  <div style={{marginBottom:16,paddingBottom:14,borderBottom:"1px solid rgba(0,207,255,0.08)"}}>
-                    <div style={{fontSize:14,color:"#00cfff",letterSpacing:1,fontWeight:700}}>@{username}</div>
-                    <div style={{fontSize:10,color:"#2a3040",letterSpacing:1,marginTop:4}}>{result.pfp_energy}</div>
-                  </div>
-
-                  {/* Big age */}
-                  <div style={{marginBottom:18}}>
-                    <div style={{fontSize:"4rem",fontWeight:900,color:ac,lineHeight:1,letterSpacing:-3}}>{result.predicted_age}</div>
-                    <div style={{fontSize:9,color:"#3a4a5a",letterSpacing:2,textTransform:"uppercase",marginTop:4}}>{result.age_era}</div>
-                  </div>
-
-                  {/* Stats */}
-                  <div style={{display:"flex",flexDirection:"column",gap:14,flex:1}}>
-                    <div>
-                      <div style={{fontSize:8,letterSpacing:3,color:"#1e2535",marginBottom:4}}>X DIAGNOSIS</div>
-                      <div style={{fontSize:11,color:"#556070",lineHeight:1.5}}>{result.x_diagnosis}</div>
-                    </div>
-                    <div>
-                      <div style={{fontSize:8,letterSpacing:3,color:"#1e2535",marginBottom:4}}>SECRET TRAIT</div>
-                      <div style={{fontSize:11,color:"#445060",fontStyle:"italic",lineHeight:1.5}}>{result.secret_trait}</div>
-                    </div>
-                    {xProfile && (xProfile as {join_year?:number}).join_year && (
-                      <div>
-                        <div style={{fontSize:8,letterSpacing:3,color:"#1e2535",marginBottom:4}}>ON X SINCE</div>
-                        <div style={{fontSize:11,color:"#3a4a5a"}}>{(xProfile as {join_year?:number}).join_year}</div>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Roast pinned to bottom */}
-                  <div style={{borderTop:"1px solid #111820",paddingTop:14,marginTop:"auto"}}>
-                    <div style={{fontSize:8,letterSpacing:3,color:"#1e2535",marginBottom:6}}>◈ ORACLE SAYS</div>
-                    <div style={{fontSize:11,color:"#99aabb",fontStyle:"italic",lineHeight:1.6}}>"{result.roast}"</div>
-                  </div>
+                {/* Roast — full width */}
+                <div style={{borderTop:"1px solid #111820",paddingTop:12}}>
+                  <div style={{fontSize:8,letterSpacing:3,color:"#1e2535",marginBottom:6}}>◈ ORACLE SAYS</div>
+                  <div style={{fontSize:12,color:"#99aabb",fontStyle:"italic",lineHeight:1.6}}>"{result.roast}"</div>
                 </div>
               </div>
 
               {/* Footer */}
-              <div style={{padding:"6px 18px",background:"#060709",display:"flex",justifyContent:"space-between",borderTop:"1px solid #0a0b10"}}>
-                <span style={{fontSize:8,color:"#1a1a22",letterSpacing:3}}>AGE.EXE · X ORACLE</span>
-                <span style={{fontSize:8,color:"#1a1a22",letterSpacing:2}}>ENTERTAINMENT ONLY</span>
+              <div style={{padding:"5px 16px",background:"#060709",display:"flex",justifyContent:"space-between",borderTop:"1px solid #0a0b10"}}>
+                <span style={{fontSize:7,color:"#1a1a22",letterSpacing:3}}>AGE.EXE · X ORACLE</span>
+                <span style={{fontSize:7,color:"#1a1a22",letterSpacing:2}}>ENTERTAINMENT ONLY</span>
               </div>
             </div>
           </div>
