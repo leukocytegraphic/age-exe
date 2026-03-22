@@ -3,15 +3,21 @@ import { NextResponse } from "next/server";
 
 export async function POST(req: Request) {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      console.error("GEMINI_API_KEY missing");
-      return NextResponse.json({ error: "Key missing" }, { status: 500 });
-    }
-
     const { username, pfpBase64, mediaType, vibe, tweetTopic, xProfile } = await req.json();
 
-    // Build X context from scraped data
+    // 1. Collect all 4 keys into an array
+    const keys = [
+      process.env.GEMINI_API_KEY,
+      process.env.GEMINI_API_KEY_2,
+      process.env.GEMINI_API_KEY_3,
+      process.env.GEMINI_API_KEY_4
+    ].filter(Boolean) as string[];
+
+    if (keys.length === 0) {
+      return NextResponse.json({ error: "All GEMINI_API_KEYS are missing" }, { status: 500 });
+    }
+
+    // Build X context from scraped data (unaltered)
     let xCtx = "No X profile data.";
     if (xProfile?.display_name) {
       const tweets = xProfile.recent_tweets?.slice(0, 3).join(" | ") || "none";
@@ -26,9 +32,6 @@ export async function POST(req: Request) {
         xProfile.pinned_tweet ? `Pinned: ${xProfile.pinned_tweet}` : "",
       ].filter(Boolean).join(" | ");
     }
-
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
     const prompt = `You are the X Oracle — a savage, witty cultural analyst. Analyze this profile picture for @${username}.
 
@@ -45,24 +48,49 @@ Rules:
 
 {"predicted_age":24,"confidence":"High","age_era":"Neo-Tokyo Edgelord","roast":"Your roast here referencing something specific you see","pfp_energy":"Chaotic Neutral","x_diagnosis":"Specific diagnosis","secret_trait":"Uncomfortably accurate trait","aged_portrait_prompt":"Hyper-realistic full body portrait of this exact person aged to predicted_age..."}`;
 
-    const result = await model.generateContent([
-      prompt,
-      { inlineData: { data: pfpBase64, mimeType: mediaType || "image/jpeg" } },
-    ]);
+    // 2. Failover Loop: Iterate through keys if one fails
+    for (let i = 0; i < keys.length; i++) {
+      const currentKey = keys[i];
+      
+      try {
+        const genAI = new GoogleGenerativeAI(currentKey);
+        // Note: Kept your specific model name "gemini-2.5-flash" 
+        const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
-    const text = result.response.text();
-    console.log("Gemini raw response:", text.slice(0, 200));
+        const result = await model.generateContent([
+          prompt,
+          { inlineData: { data: pfpBase64, mimeType: mediaType || "image/jpeg" } },
+        ]);
 
-    const jsonStart = text.indexOf("{");
-    const jsonEnd = text.lastIndexOf("}") + 1;
-    const cleanJson = text.substring(jsonStart, jsonEnd);
-    const parsed = JSON.parse(cleanJson);
+        const text = result.response.text();
+        console.log(`Gemini raw response (Key ${i + 1}):`, text.slice(0, 200));
 
-    // Ensure age is valid 0-100
-    const age = parseInt(parsed.predicted_age);
-    parsed.predicted_age = (!isNaN(age) && age >= 0 && age <= 100) ? age : 25;
+        const jsonStart = text.indexOf("{");
+        const jsonEnd = text.lastIndexOf("}") + 1;
+        const cleanJson = text.substring(jsonStart, jsonEnd);
+        const parsed = JSON.parse(cleanJson);
 
-    return NextResponse.json({ result: parsed });
+        // Ensure age is valid 0-100
+        const age = parseInt(parsed.predicted_age);
+        parsed.predicted_age = (!isNaN(age) && age >= 0 && age <= 100) ? age : 25;
+
+        // If successful, return the result immediately and exit the loop
+        return NextResponse.json({ result: parsed });
+
+      } catch (error: any) {
+        // Check if the error is a Rate Limit/Quota issue (429)
+        const isQuotaError = error.status === 429 || error.message?.includes("429") || error.message?.includes("quota");
+
+        if (isQuotaError && i < keys.length - 1) {
+          console.warn(`Key ${i + 1} exhausted. Rotating to next key...`);
+          continue; // Try the next key in the loop
+        }
+
+        // If it's a different error OR we are out of keys, throw the error
+        throw error;
+      }
+    }
+
   } catch (error: unknown) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error("Oracle crash:", msg);
